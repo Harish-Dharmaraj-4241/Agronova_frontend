@@ -16,8 +16,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -31,11 +34,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -47,11 +54,11 @@ import com.simats.agronova.user.NavScreen
 import com.simats.agronova.viewmodel.AssistantViewModel
 import com.simats.agronova.viewmodel.ChatMessage
 import java.util.*
+import kotlin.math.roundToInt
 
 class AssistantActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
     private lateinit var tts: TextToSpeech
-    // State to track if AI is currently talking
     val isTtsSpeaking = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -68,7 +75,7 @@ class AssistantActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         setContent {
             AgronovaTheme {
                 AssistantScreen(
-                    viewModel = viewModel(),
+                    viewModel = viewModel(), // Automatically uses AndroidViewModel
                     isTtsSpeaking = isTtsSpeaking.value,
                     onSpeakRequested = { text -> speakOut(text) },
                     onStopAudio = { stopSpeaking() }
@@ -78,9 +85,7 @@ class AssistantActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     }
 
     override fun onInit(status: Int) {
-        if (status == TextToSpeech.SUCCESS) {
-            tts.language = Locale.getDefault()
-        }
+        if (status == TextToSpeech.SUCCESS) { tts.language = Locale.getDefault() }
     }
 
     private fun speakOut(text: String) {
@@ -96,6 +101,12 @@ class AssistantActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         }
     }
 
+    // FIX: This stops the "Ghost" voice when you switch pages
+    override fun onPause() {
+        super.onPause()
+        stopSpeaking()
+    }
+
     override fun onDestroy() {
         if (::tts.isInitialized) {
             tts.stop()
@@ -105,7 +116,7 @@ class AssistantActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun AssistantScreen(
     viewModel: AssistantViewModel,
@@ -114,12 +125,17 @@ fun AssistantScreen(
     onStopAudio: () -> Unit
 ) {
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     val listState = rememberLazyListState()
 
     var inputText by remember { mutableStateOf("") }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     var expandedLanguageMenu by remember { mutableStateOf(false) }
     var isRecording by remember { mutableStateOf(false) }
+
+    // WhatsApp-Style States
+    val selectedMessageIds = remember { mutableStateListOf<Int>() }
+    var replyingToMessage by remember { mutableStateOf<ChatMessage?>(null) }
 
     LaunchedEffect(viewModel.latestVoiceResponse.value) {
         viewModel.latestVoiceResponse.value?.let { onSpeakRequested(it) }
@@ -159,7 +175,6 @@ fun AssistantScreen(
             override fun onResults(results: Bundle?) {
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 if (!matches.isNullOrEmpty()) {
-                    // Append spoken text to existing input text (supports image + text + voice)
                     inputText = if (inputText.isEmpty()) matches[0] else "$inputText ${matches[0]}"
                 }
                 isRecording = false
@@ -198,49 +213,87 @@ fun AssistantScreen(
         Column(
             modifier = Modifier.fillMaxSize().padding(paddingValues)
         ) {
-            // Header with Stop Button and Language Dropdown
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("AgroNova AI", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = AgroGreen)
-
-                    // Conditionally show Stop Voice button
-                    if (isTtsSpeaking) {
-                        Spacer(modifier = Modifier.width(12.dp))
-                        IconButton(
-                            onClick = onStopAudio,
-                            modifier = Modifier.size(32.dp).background(Color(0xFFFFEBEE), CircleShape)
-                        ) {
-                            Icon(Icons.Filled.VolumeOff, contentDescription = "Stop Voice", tint = Color(0xFFE53935), modifier = Modifier.size(18.dp))
+            // Contextual Top App Bar
+            if (selectedMessageIds.isNotEmpty()) {
+                Surface(
+                    color = Color(0xFFE8F5E9),
+                    shadowElevation = 4.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = { selectedMessageIds.clear() }) {
+                                Icon(Icons.Filled.Close, contentDescription = "Cancel", tint = AgroGreen)
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("${selectedMessageIds.size} Selected", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = AgroGreen)
+                        }
+                        Row {
+                            IconButton(onClick = {
+                                selectedMessageIds.clear()
+                                selectedMessageIds.addAll(viewModel.chatHistory.map { it.id })
+                            }) {
+                                Icon(Icons.Filled.SelectAll, contentDescription = "Select All", tint = AgroGreen)
+                            }
+                            IconButton(onClick = {
+                                if (selectedMessageIds.size == viewModel.chatHistory.size) {
+                                    viewModel.deleteAllMessages()
+                                } else {
+                                    viewModel.deleteSelectedMessages(selectedMessageIds.toList())
+                                }
+                                selectedMessageIds.clear()
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            }) {
+                                Icon(Icons.Filled.Delete, contentDescription = "Delete", tint = Color.Red)
+                            }
                         }
                     }
                 }
-
-                Box {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = Color.White, shadowElevation = 2.dp,
-                        modifier = Modifier.clickable { expandedLanguageMenu = true }
-                    ) {
-                        Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.Language, contentDescription = null, tint = AgroGreen, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(viewModel.selectedLanguage.value, fontWeight = FontWeight.Bold, color = AgroTextPrimary)
-                            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, tint = Color.Gray)
+            } else {
+                // Normal Top Bar
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("AgroNova AI", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = AgroGreen)
+                        if (isTtsSpeaking) {
+                            Spacer(modifier = Modifier.width(12.dp))
+                            IconButton(
+                                onClick = onStopAudio,
+                                modifier = Modifier.size(32.dp).background(Color(0xFFFFEBEE), CircleShape)
+                            ) {
+                                Icon(Icons.Filled.VolumeOff, contentDescription = "Stop Voice", tint = Color(0xFFE53935), modifier = Modifier.size(18.dp))
+                            }
                         }
                     }
-                    DropdownMenu(expanded = expandedLanguageMenu, onDismissRequest = { expandedLanguageMenu = false }) {
-                        viewModel.availableLanguages.forEach { language ->
-                            DropdownMenuItem(
-                                text = { Text(language) },
-                                onClick = {
-                                    viewModel.selectedLanguage.value = language
-                                    expandedLanguageMenu = false
-                                }
-                            )
+                    Box {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp), color = Color.White, shadowElevation = 2.dp,
+                            modifier = Modifier.clickable { expandedLanguageMenu = true }
+                        ) {
+                            Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.Language, contentDescription = null, tint = AgroGreen, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(viewModel.selectedLanguage.value, fontWeight = FontWeight.Bold, color = AgroTextPrimary)
+                                Icon(Icons.Filled.ArrowDropDown, contentDescription = null, tint = Color.Gray)
+                            }
+                        }
+                        DropdownMenu(expanded = expandedLanguageMenu, onDismissRequest = { expandedLanguageMenu = false }) {
+                            viewModel.availableLanguages.forEach { language ->
+                                DropdownMenuItem(
+                                    text = { Text(language) },
+                                    onClick = {
+                                        viewModel.selectedLanguage.value = language
+                                        expandedLanguageMenu = false
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -252,11 +305,33 @@ fun AssistantScreen(
                 modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                items(viewModel.chatHistory) { message -> ChatBubble(message) }
+                items(viewModel.chatHistory, key = { it.id }) { message ->
+                    val isSelected = selectedMessageIds.contains(message.id)
+
+                    ChatBubble(
+                        message = message,
+                        isSelected = isSelected,
+                        onLongPress = {
+                            if (isSelected) selectedMessageIds.remove(message.id)
+                            else selectedMessageIds.add(message.id)
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        },
+                        onClick = {
+                            if (selectedMessageIds.isNotEmpty()) {
+                                if (isSelected) selectedMessageIds.remove(message.id)
+                                else selectedMessageIds.add(message.id)
+                            }
+                        },
+                        onSwipeToReply = {
+                            replyingToMessage = message
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        }
+                    )
+                }
                 if (viewModel.isAiTyping.value) item { TypingIndicatorBubble() }
             }
 
-            // Input Area (Professional UI)
+            // Input Area
             Surface(
                 color = Color.White,
                 shadowElevation = 8.dp,
@@ -264,6 +339,30 @@ fun AssistantScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
+
+                    // Reply Preview Box
+                    if (replyingToMessage != null) {
+                        Surface(
+                            color = Color(0xFFE8F5E9),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(if (replyingToMessage!!.isUser) "Replying to yourself" else "Replying to AgroNova AI", color = AgroGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    Text(replyingToMessage!!.text, color = Color.DarkGray, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                IconButton(onClick = { replyingToMessage = null }, modifier = Modifier.size(24.dp)) {
+                                    Icon(Icons.Filled.Close, contentDescription = "Cancel Reply", tint = Color.Gray)
+                                }
+                            }
+                        }
+                    }
+
                     // Image Preview
                     if (selectedImageUri != null) {
                         Box(modifier = Modifier.padding(bottom = 12.dp)) {
@@ -301,7 +400,6 @@ fun AssistantScreen(
                             )
                         )
 
-                        // Separate Mic Button (Always available to append voice)
                         IconButton(
                             onClick = {
                                 if (isRecording) {
@@ -324,14 +422,14 @@ fun AssistantScreen(
                             )
                         }
 
-                        // Send Button
                         if (inputText.isNotEmpty() || selectedImageUri != null) {
                             IconButton(
                                 onClick = {
                                     if (!viewModel.isAiTyping.value) {
-                                        viewModel.sendMessage(context, inputText, selectedImageUri)
+                                        viewModel.sendMessage(context, inputText, selectedImageUri, replyingToMessage?.text)
                                         inputText = ""
                                         selectedImageUri = null
+                                        replyingToMessage = null // Clear reply after sending
                                     }
                                 },
                                 modifier = Modifier.size(40.dp).background(AgroGreen, CircleShape)
@@ -346,57 +444,120 @@ fun AssistantScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun ChatBubble(message: ChatMessage) {
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-        horizontalAlignment = if (message.isUser) Alignment.End else Alignment.Start
-    ) {
-        Row(
-            verticalAlignment = Alignment.Bottom,
-            horizontalArrangement = if (message.isUser) Arrangement.End else Arrangement.Start,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            if (!message.isUser) {
-                Box(modifier = Modifier.size(32.dp).background(Color(0xFFE8F5E9), CircleShape).padding(6.dp), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Filled.Eco, contentDescription = "AI", tint = AgroGreen, modifier = Modifier.size(18.dp))
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-            }
+fun ChatBubble(
+    message: ChatMessage,
+    isSelected: Boolean,
+    onLongPress: () -> Unit,
+    onClick: () -> Unit,
+    onSwipeToReply: () -> Unit
+) {
+    var offsetX by remember { mutableStateOf(0f) }
+    val animatedOffsetX by animateFloatAsState(targetValue = offsetX, label = "swipe_animation")
 
-            Surface(
-                shape = RoundedCornerShape(
-                    topStart = 20.dp, topEnd = 20.dp,
-                    bottomStart = if (message.isUser) 20.dp else 4.dp,
-                    bottomEnd = if (message.isUser) 4.dp else 20.dp
-                ),
-                color = if (message.isUser) AgroGreen else Color.White,
-                shadowElevation = 1.dp,
-                modifier = Modifier.widthIn(max = 280.dp)
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(if (isSelected) AgroGreen.copy(alpha = 0.2f) else Color.Transparent)
+            .combinedClickable(
+                onLongClick = { onLongPress() },
+                onClick = { onClick() }
+            )
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragEnd = {
+                        if (offsetX > 150f) onSwipeToReply() // Trigger reply if swiped far enough
+                        offsetX = 0f // Bounce back
+                    },
+                    onHorizontalDrag = { change, dragAmount ->
+                        change.consume()
+                        val newOffset = offsetX + dragAmount
+                        if (newOffset in 0f..250f) offsetX = newOffset // Only allow swiping right
+                    }
+                )
+            }
+    ) {
+        // Reply Icon Background (revealed when swiping)
+        if (animatedOffsetX > 20f) {
+            Box(
+                modifier = Modifier.align(Alignment.CenterStart).padding(start = 16.dp).size(36.dp).background(AgroGreen, CircleShape),
+                contentAlignment = Alignment.Center
             ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    if (message.attachedImageUri != null) {
-                        AsyncImage(
-                            model = message.attachedImageUri, contentDescription = null,
-                            modifier = Modifier.fillMaxWidth().height(140.dp).clip(RoundedCornerShape(8.dp)).padding(bottom = 8.dp),
-                            contentScale = ContentScale.Crop
-                        )
-                    }
-                    if (message.text.isNotEmpty()) {
-                        Text(
-                            text = message.text,
-                            color = if (message.isUser) Color.White else AgroTextPrimary,
-                            fontSize = 15.sp, lineHeight = 22.sp
-                        )
-                    }
-                }
+                Icon(Icons.Filled.Reply, contentDescription = "Reply", tint = Color.White, modifier = Modifier.size(20.dp))
             }
         }
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = message.timestampLabel, fontSize = 10.sp, color = Color.Gray,
-            modifier = Modifier.padding(start = if (message.isUser) 0.dp else 40.dp, end = if (message.isUser) 4.dp else 0.dp)
-        )
+
+        // The actual Bubble
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = if(isSelected) 16.dp else 0.dp).offset { IntOffset(animatedOffsetX.roundToInt(), 0) }.padding(bottom = 8.dp),
+            horizontalAlignment = if (message.isUser) Alignment.End else Alignment.Start
+        ) {
+            Row(
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = if (message.isUser) Arrangement.End else Arrangement.Start,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                if (!message.isUser) {
+                    Box(modifier = Modifier.size(32.dp).background(Color(0xFFE8F5E9), CircleShape).padding(6.dp), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Filled.Eco, contentDescription = "AI", tint = AgroGreen, modifier = Modifier.size(18.dp))
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(
+                        topStart = 20.dp, topEnd = 20.dp,
+                        bottomStart = if (message.isUser) 20.dp else 4.dp,
+                        bottomEnd = if (message.isUser) 4.dp else 20.dp
+                    ),
+                    color = if (message.isUser) AgroGreen else Color.White,
+                    shadowElevation = 1.dp,
+                    modifier = Modifier.widthIn(max = 280.dp)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+
+                        // Mini Reply Context inside the chat bubble
+                        if (message.replyToMessage != null) {
+                            Surface(
+                                color = if(message.isUser) Color.White.copy(alpha=0.2f) else Color(0xFFF5F5F5),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                            ) {
+                                Text(
+                                    text = message.replyToMessage,
+                                    color = if (message.isUser) Color.White else Color.DarkGray,
+                                    fontSize = 12.sp,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(8.dp)
+                                )
+                            }
+                        }
+
+                        if (message.attachedImageUri != null) {
+                            AsyncImage(
+                                model = message.attachedImageUri, contentDescription = null,
+                                modifier = Modifier.fillMaxWidth().height(140.dp).clip(RoundedCornerShape(8.dp)).padding(bottom = 8.dp),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                        if (message.text.isNotEmpty()) {
+                            Text(
+                                text = message.text,
+                                color = if (message.isUser) Color.White else AgroTextPrimary,
+                                fontSize = 15.sp, lineHeight = 22.sp
+                            )
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = message.timestampLabel, fontSize = 10.sp, color = Color.Gray,
+                modifier = Modifier.padding(start = if (message.isUser) 0.dp else 40.dp, end = if (message.isUser) 4.dp else 0.dp)
+            )
+        }
     }
 }
 

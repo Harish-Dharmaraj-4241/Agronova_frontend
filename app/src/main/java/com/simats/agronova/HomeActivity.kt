@@ -74,6 +74,7 @@ fun HomeScreen() {
     val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
 
     val userName = sharedPrefs.getString("USER_NAME", "Farmer") ?: "Farmer"
+    val userEmail = sharedPrefs.getString("USER_EMAIL", "") ?: "" // Added to send to backend
     var savedLocation by remember { mutableStateOf(sharedPrefs.getString("FARM_LOCATION", "Tap to set location") ?: "Tap to set location") }
 
     var showLocationDialog by remember { mutableStateOf(false) }
@@ -104,7 +105,15 @@ fun HomeScreen() {
                 .putFloat("LONGITUDE", lon.toFloat())
                 .apply()
 
-            // TODO: Call backend API to save
+            if (userEmail.isNotEmpty()) {
+                coroutineScope.launch {
+                    try {
+                        com.simats.agronova.service.RetrofitClient.apiService.updateLocation(
+                            com.simats.agronova.model.UpdateLocationRequest(userEmail, lat, lon, locString)
+                        )
+                    } catch (e: Exception) { e.printStackTrace() }
+                }
+            }
         }
     }
 
@@ -160,7 +169,14 @@ fun HomeScreen() {
                         .putFloat("LATITUDE", finalLat)
                         .putFloat("LONGITUDE", finalLon)
                         .apply()
-                    // TODO: Call API
+
+                    if (userEmail.isNotEmpty()) {
+                        try {
+                            com.simats.agronova.service.RetrofitClient.apiService.updateLocation(
+                                com.simats.agronova.model.UpdateLocationRequest(userEmail, finalLat.toDouble(), finalLon.toDouble(), addressString)
+                            )
+                        } catch (e: Exception) { e.printStackTrace() }
+                    }
                     Toast.makeText(context, "Location Grabbed!", Toast.LENGTH_SHORT).show()
                 } else {
                     Toast.makeText(context, "Please turn on GPS and try again.", Toast.LENGTH_LONG).show()
