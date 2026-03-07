@@ -1,6 +1,7 @@
 package com.simats.agronova
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -125,8 +126,14 @@ fun AssistantScreen(
     onStopAudio: () -> Unit
 ) {
     val context = LocalContext.current
+    val sharedPrefs = context.getSharedPreferences("AgroNovaPrefs", Context.MODE_PRIVATE)
     val haptic = LocalHapticFeedback.current
     val listState = rememberLazyListState()
+
+    // Sync ViewModel's language with Global Preferences when screen opens
+    LaunchedEffect(Unit) {
+        viewModel.selectedLanguage.value = sharedPrefs.getString("USER_LANGUAGE", "English") ?: "English"
+    }
 
     var inputText by remember { mutableStateOf("") }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
@@ -196,8 +203,8 @@ fun AssistantScreen(
                             (context as? android.app.Activity)?.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
                         }
                         NavScreen.Assistant -> {}
-                        NavScreen.Ledger -> {
-                            context.startActivity(Intent(context, LedgerActivity::class.java))
+                        NavScreen.Tools -> {
+                            context.startActivity(Intent(context, ToolsActivity::class.java))
                             (context as? android.app.Activity)?.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
                         }
                         NavScreen.Profile -> {
@@ -291,6 +298,8 @@ fun AssistantScreen(
                                     onClick = {
                                         viewModel.selectedLanguage.value = language
                                         expandedLanguageMenu = false
+                                        // Save back to global settings if changed here!
+                                        sharedPrefs.edit().putString("USER_LANGUAGE", language).apply()
                                     }
                                 )
                             }

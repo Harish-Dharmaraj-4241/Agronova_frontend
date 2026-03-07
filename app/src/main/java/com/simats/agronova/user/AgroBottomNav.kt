@@ -12,7 +12,7 @@ import com.simats.agronova.ui.theme.AgroGreen
 
 // Define the screens to easily track the active state
 enum class NavScreen {
-    Home, Assistant, Ledger, Profile
+    Home, Assistant, Tools, Profile
 }
 
 data class BottomNavItem(
@@ -30,7 +30,7 @@ fun AgroBottomNav(
     val items = listOf(
         BottomNavItem(NavScreen.Home, "Home", Icons.Filled.Home, Icons.Outlined.Home),
         BottomNavItem(NavScreen.Assistant, "Assistant", Icons.Filled.SmartToy, Icons.Outlined.SmartToy),
-        BottomNavItem(NavScreen.Ledger, "Ledger", Icons.Filled.AccountBalanceWallet, Icons.Outlined.AccountBalanceWallet),
+        BottomNavItem(NavScreen.Tools, "Tools", Icons.Filled.Widgets, Icons.Outlined.Widgets),
         BottomNavItem(NavScreen.Profile, "Profile", Icons.Filled.Person, Icons.Outlined.Person)
     )
 

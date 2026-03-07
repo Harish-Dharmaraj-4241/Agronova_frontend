@@ -17,6 +17,8 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -42,11 +45,14 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.android.gms.location.LocationServices
 import com.simats.agronova.map.MapActivity
 import com.simats.agronova.ui.theme.*
 import com.simats.agronova.user.AgroBottomNav
 import com.simats.agronova.user.NavScreen
+import com.simats.agronova.viewmodel.HomeViewModel
+import com.simats.agronova.viewmodel.CropCalendarViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -73,12 +79,22 @@ fun HomeScreen() {
     val sharedPrefs = context.getSharedPreferences("AgroNovaPrefs", Context.MODE_PRIVATE)
     val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
 
+    // Inject ViewModels
+    val homeViewModel: HomeViewModel = viewModel()
+    val cropCalendarViewModel: CropCalendarViewModel = viewModel()
+
     val userName = sharedPrefs.getString("USER_NAME", "Farmer") ?: "Farmer"
-    val userEmail = sharedPrefs.getString("USER_EMAIL", "") ?: "" // Added to send to backend
+    val userEmail = sharedPrefs.getString("USER_EMAIL", "") ?: ""
     var savedLocation by remember { mutableStateOf(sharedPrefs.getString("FARM_LOCATION", "Tap to set location") ?: "Tap to set location") }
 
     var showLocationDialog by remember { mutableStateOf(false) }
-    var isFetchingLocation by remember { mutableStateOf(false) } // Triggers the radar animation
+    var isFetchingLocation by remember { mutableStateOf(false) }
+
+    // Fetch live weather & calendar when location changes
+    LaunchedEffect(savedLocation) {
+        homeViewModel.fetchWeather(context)
+        cropCalendarViewModel.fetchCalendars(context)
+    }
 
     val greeting = remember {
         val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
@@ -90,7 +106,6 @@ fun HomeScreen() {
         }
     }
 
-    // Map Activity Result Launcher
     val mapLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             val data = result.data
@@ -117,17 +132,14 @@ fun HomeScreen() {
         }
     }
 
-    // Permission Launcher for GPS
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         if (permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true || permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true) {
             isFetchingLocation = true
 
-            // Launch coroutine to guarantee exactly 2 seconds of animation
             coroutineScope.launch {
-                val minimumWaitJob = launch { delay(2000) } // Enforce 2s wait
-
+                val minimumWaitJob = launch { delay(2000) }
                 var addressString = "Location not found"
                 var finalLat = 0f
                 var finalLon = 0f
@@ -155,11 +167,8 @@ fun HomeScreen() {
                         }
                         success = true
                     }
-                } catch (e: Exception) {
-                    success = false
-                }
+                } catch (e: Exception) { success = false }
 
-                // Wait for the 2 seconds to finish if the GPS fetched too quickly
                 minimumWaitJob.join()
 
                 if (success) {
@@ -212,22 +221,12 @@ fun HomeScreen() {
         )
     }
 
-    // Cinematic Full-Screen Radar Animation
     if (isFetchingLocation) {
         Dialog(
             onDismissRequest = { /* Force wait */ },
-            properties = DialogProperties(
-                dismissOnBackPress = false,
-                dismissOnClickOutside = false,
-                usePlatformDefaultWidth = false // Makes it full screen
-            )
+            properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false, usePlatformDefaultWidth = false)
         ) {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.7f)) // Dark cinematic background
-            ) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.7f))) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     PulseAnimation()
                     Spacer(modifier = Modifier.height(24.dp))
@@ -246,15 +245,15 @@ fun HomeScreen() {
                         NavScreen.Home -> {}
                         NavScreen.Assistant -> {
                             context.startActivity(Intent(context, AssistantActivity::class.java))
-                            (context as? android.app.Activity)?.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
+                            (context as? Activity)?.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
                         }
-                        NavScreen.Ledger -> {
-                            context.startActivity(Intent(context, LedgerActivity::class.java))
-                            (context as? android.app.Activity)?.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
+                        NavScreen.Tools -> {
+                            context.startActivity(Intent(context, ToolsActivity::class.java))
+                            (context as? Activity)?.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
                         }
                         NavScreen.Profile -> {
                             context.startActivity(Intent(context, ProfileActivity::class.java))
-                            (context as? android.app.Activity)?.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
+                            (context as? Activity)?.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
                         }
                     }
                 }
@@ -269,11 +268,7 @@ fun HomeScreen() {
                 .verticalScroll(rememberScrollState())
                 .padding(20.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top
-            ) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
                 Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
                     Text(text = greeting, fontSize = 18.sp, color = Color.Gray, maxLines = 1)
                     Text(text = "$userName 👋", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = AgroGreen, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -281,10 +276,7 @@ fun HomeScreen() {
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { showLocationDialog = true }
-                            .padding(vertical = 4.dp, horizontal = 2.dp)
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { showLocationDialog = true }.padding(vertical = 4.dp, horizontal = 2.dp)
                     ) {
                         Icon(Icons.Filled.LocationOn, contentDescription = "Location", tint = AgroGreen, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
@@ -296,7 +288,7 @@ fun HomeScreen() {
                 IconButton(
                     onClick = {
                         context.startActivity(Intent(context, SettingsActivity::class.java))
-                        (context as? android.app.Activity)?.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
+                        (context as? Activity)?.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
                     },
                     modifier = Modifier.background(Color.White, CircleShape).shadow(2.dp, CircleShape)
                 ) {
@@ -306,133 +298,193 @@ fun HomeScreen() {
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = AgroGreen),
-                modifier = Modifier.fillMaxWidth(),
-                elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.WbSunny, contentDescription = "Weather", tint = AgroAccent, modifier = Modifier.size(36.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("28°C", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(modifier = Modifier.size(8.dp).background(Color.Green, CircleShape))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("ONLINE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                            }
-                            Text("CROP HEALTH", fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f))
-                            Text("Excellent", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.Green)
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("Partly Cloudy • Humidity 62%", fontSize = 14.sp, color = Color.White.copy(alpha = 0.9f))
-
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Divider(color = Color.White.copy(alpha = 0.2f), thickness = 1.dp)
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.Warning, contentDescription = "Alert", tint = AgroAccent, modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Wheat crop needs irrigation in 2 days", fontSize = 13.sp, color = Color.White)
-                    }
-                }
+            // Weather Card
+            GoogleWeatherCard(homeViewModel, cropCalendarViewModel) {
+                context.startActivity(Intent(context, WeatherActivity::class.java))
+                (context as? Activity)?.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
             }
 
             Spacer(modifier = Modifier.height(24.dp))
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                ActionCard(
-                    modifier = Modifier.weight(1f), title = "Disease Scanner", subtitle = "Instant Diagnosis",
-                    icon = Icons.Filled.CameraAlt, iconColor = Color(0xFFFF8A65),
-                    onClick = { context.startActivity(Intent(context, DiseaseScannerActivity::class.java)) }
-                )
-                ActionCard(
-                    modifier = Modifier.weight(1f), title = "Chemical Translator", subtitle = "Safety Insights",
-                    icon = Icons.Filled.Science, iconColor = Color(0xFF64B5F6),
-                    onClick = { context.startActivity(Intent(context, ChemicalTranslatorActivity::class.java)) }
-                )
+                ActionCard(modifier = Modifier.weight(1f), title = "Disease Scanner", subtitle = "Instant Diagnosis", icon = Icons.Filled.CameraAlt, iconColor = Color(0xFFFF8A65), onClick = { context.startActivity(Intent(context, DiseaseScannerActivity::class.java)) })
+                ActionCard(modifier = Modifier.weight(1f), title = "Chemical Translator", subtitle = "Safety Insights", icon = Icons.Filled.Science, iconColor = Color(0xFF64B5F6), onClick = { context.startActivity(Intent(context, ChemicalTranslatorActivity::class.java)) })
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                ActionCard(
-                    modifier = Modifier.weight(1f), title = "Crop Calendar", subtitle = "Plan Season",
-                    icon = Icons.Filled.CalendarMonth, iconColor = Color(0xFFBA68C8),
-                    onClick = { context.startActivity(Intent(context, CropCalendarActivity::class.java)) }
-                )
-                ActionCard(
-                    modifier = Modifier.weight(1f), title = "Resource Hub", subtitle = "Expert Advice",
-                    icon = Icons.Filled.People, iconColor = Color(0xFF4DB6AC),
-                    onClick = { context.startActivity(Intent(context, ResourceHubActivity::class.java)) }
-                )
+                ActionCard(modifier = Modifier.weight(1f), title = "Crop Calendar", subtitle = "Plan Season", icon = Icons.Filled.CalendarMonth, iconColor = Color(0xFFBA68C8), onClick = { context.startActivity(Intent(context, CropCalendarActivity::class.java)) })
+                ActionCard(modifier = Modifier.weight(1f), title = "Resource Hub", subtitle = "Local Marketplace", icon = Icons.Filled.Handshake, iconColor = Color(0xFF4DB6AC), onClick = { context.startActivity(Intent(context, ResourceHubActivity::class.java)) })
             }
 
             Spacer(modifier = Modifier.height(32.dp))
 
+            // NEW: Clean, click-to-open Teaser Card for Market Intelligence
+            Text("Market Intelligence", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0F172A), modifier = Modifier.padding(bottom = 12.dp, start = 4.dp))
+
             Surface(
-                shape = RoundedCornerShape(24.dp), color = Color.White, shadowElevation = 4.dp,
+                shape = RoundedCornerShape(24.dp),
+                shadowElevation = 3.dp,
+                color = Color.White,
                 modifier = Modifier.fillMaxWidth().clickable {
-                    context.startActivity(Intent(context, AssistantActivity::class.java))
-                    (context as? android.app.Activity)?.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
+                    context.startActivity(Intent(context, MarketIntelligenceActivity::class.java))
+                    (context as? Activity)?.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
                 }
             ) {
-                Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Box(modifier = Modifier.size(70.dp).background(Color(0xFFE8F5E9), CircleShape), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Filled.Mic, contentDescription = "Speak", tint = AgroGreen, modifier = Modifier.size(35.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                        Surface(color = Color(0xFFE8F5E9), shape = CircleShape) {
+                            Icon(Icons.Filled.TrendingUp, contentDescription = null, tint = AgroGreen, modifier = Modifier.padding(12.dp).size(28.dp))
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column {
+                            Text("AI Price Prediction", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0F172A))
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("Tap to view today's market trends and crop sowing advice.", fontSize = 13.sp, color = Color.Gray, lineHeight = 18.sp)
+                        }
                     }
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text("Tap to Speak", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = AgroTextPrimary)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("\"How is my soil health today?\"", fontSize = 14.sp, color = Color.Gray)
+                    Icon(Icons.Filled.ChevronRight, contentDescription = "View", tint = Color.LightGray)
                 }
             }
-
             Spacer(modifier = Modifier.height(20.dp))
         }
     }
 }
 
 @Composable
+fun GoogleWeatherCard(homeViewModel: HomeViewModel, calendarViewModel: CropCalendarViewModel, onWeatherClick: () -> Unit) {
+    val weather by homeViewModel.weatherData
+    val isLoading by homeViewModel.isLoading
+    val apiError by homeViewModel.apiError
+
+    val pendingTask = calendarViewModel.calendars.value.flatMap { it.tasks }.firstOrNull { !it.isCompleted }
+
+    Card(
+        shape = RoundedCornerShape(24.dp),
+        modifier = Modifier.fillMaxWidth().clickable { onWeatherClick() },
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+    ) {
+        Box(
+            modifier = Modifier.fillMaxWidth().background(
+                Brush.verticalGradient(listOf(AgroGreen, Color(0xFF1B5E20)))
+            ).padding(20.dp)
+        ) {
+            if (isLoading) {
+                CircularProgressIndicator(color = Color.White, modifier = Modifier.align(Alignment.Center).padding(20.dp))
+            } else if (apiError != null) {
+                Text(apiError!!, color = Color.White, modifier = Modifier.align(Alignment.Center).padding(20.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            } else if (weather != null) {
+                val current = weather!!.list.firstOrNull()
+                val temp = current?.main?.temp?.toInt()?.toString() ?: "--"
+                val desc = current?.weather?.firstOrNull()?.main ?: "Clear"
+                val humidity = current?.main?.humidity?.toString() ?: "--"
+
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.Top) {
+                            Text(text = "$temp°", fontSize = 64.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Icon(
+                                imageVector = getWeatherIcon(desc),
+                                contentDescription = desc,
+                                tint = Color(0xFFFFD54F),
+                                modifier = Modifier.size(40.dp).padding(top = 16.dp)
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(text = desc, fontSize = 20.sp, fontWeight = FontWeight.Medium, color = Color.White)
+                            Text(text = "Humidity $humidity%", fontSize = 14.sp, color = Color.White.copy(alpha = 0.8f))
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Divider(color = Color.White.copy(alpha = 0.2f), thickness = 1.dp)
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(24.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        items(weather!!.list.take(6)) { item ->
+                            val time = formatUnixTime(item.dt, weather!!.city.timezone)
+                            val itemTemp = item.main.temp.toInt().toString()
+                            val itemDesc = item.weather.firstOrNull()?.main ?: "Clear"
+
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(text = "$itemTemp°", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Icon(
+                                    imageVector = getWeatherIcon(itemDesc),
+                                    contentDescription = itemDesc,
+                                    tint = Color(0xFFFFD54F),
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(text = time, fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f))
+                            }
+                        }
+                    }
+
+                    if (pendingTask != null) {
+                        Spacer(modifier = Modifier.height(20.dp))
+                        Surface(color = Color.Black.copy(alpha = 0.2f), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+                            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.NotificationsActive, contentDescription = "Alert", tint = Color(0xFFFFD54F), modifier = Modifier.size(20.dp))
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(text = "Task due: ${pendingTask.title}", fontSize = 13.sp, color = Color.White, fontWeight = FontWeight.Medium)
+                            }
+                        }
+                    }
+                }
+            } else {
+                Text("Tap location pin to refresh weather.", color = Color.White, modifier = Modifier.align(Alignment.Center).padding(20.dp))
+            }
+        }
+    }
+}
+
+fun formatUnixTime(dt: Long, timezoneOffset: Int): String {
+    val date = java.util.Date((dt + timezoneOffset) * 1000L)
+    val sdf = java.text.SimpleDateFormat("h a", Locale.getDefault())
+    sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+    return sdf.format(date)
+}
+
+fun getWeatherIcon(desc: String): ImageVector {
+    return when (desc.lowercase()) {
+        "clear" -> Icons.Filled.WbSunny
+        "clouds" -> Icons.Filled.Cloud
+        "rain", "drizzle" -> Icons.Filled.Umbrella
+        "thunderstorm" -> Icons.Filled.FlashOn
+        else -> Icons.Filled.WbCloudy
+    }
+}
+
+@Composable
 fun PulseAnimation() {
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val scale by infiniteTransition.animateFloat(
-        initialValue = 1f, targetValue = 4f,
-        animationSpec = infiniteRepeatable(animation = tween(1500, easing = LinearOutSlowInEasing), repeatMode = RepeatMode.Restart), label = "pulse_scale"
-    )
-    val alpha by infiniteTransition.animateFloat(
-        initialValue = 1f, targetValue = 0f,
-        animationSpec = infiniteRepeatable(animation = tween(1500, easing = LinearOutSlowInEasing), repeatMode = RepeatMode.Restart), label = "pulse_alpha"
-    )
-
+    val scale by infiniteTransition.animateFloat(initialValue = 1f, targetValue = 4f, animationSpec = infiniteRepeatable(animation = tween(1500, easing = LinearOutSlowInEasing), repeatMode = RepeatMode.Restart), label = "pulse_scale")
+    val alpha by infiniteTransition.animateFloat(initialValue = 1f, targetValue = 0f, animationSpec = infiniteRepeatable(animation = tween(1500, easing = LinearOutSlowInEasing), repeatMode = RepeatMode.Restart), label = "pulse_alpha")
     Box(contentAlignment = Alignment.Center) {
         Box(modifier = Modifier.size(80.dp).scale(scale).background(AgroGreen.copy(alpha = alpha), CircleShape))
-        Box(
-            modifier = Modifier.size(80.dp).background(AgroGreen, CircleShape).shadow(12.dp, CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(Icons.Filled.LocationSearching, contentDescription = null, tint = Color.White, modifier = Modifier.size(36.dp))
-        }
+        Box(modifier = Modifier.size(80.dp).background(AgroGreen, CircleShape).shadow(12.dp, CircleShape), contentAlignment = Alignment.Center) { Icon(Icons.Filled.LocationSearching, contentDescription = null, tint = Color.White, modifier = Modifier.size(36.dp)) }
     }
 }
 
 @Composable
 fun ActionCard(modifier: Modifier = Modifier, title: String, subtitle: String, icon: ImageVector, iconColor: Color, onClick: () -> Unit) {
-    Surface(shape = RoundedCornerShape(20.dp), color = Color.White, shadowElevation = 2.dp, modifier = modifier.clickable { onClick() }) {
+    Surface(shape = RoundedCornerShape(20.dp), color = Color.White, shadowElevation = 2.dp, modifier = modifier.height(140.dp).clickable { onClick() }) {
         Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(modifier = Modifier.size(50.dp).background(iconColor.copy(alpha = 0.1f), RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
-                Icon(imageVector = icon, contentDescription = title, tint = iconColor, modifier = Modifier.size(26.dp))
-            }
+            Box(modifier = Modifier.size(50.dp).background(iconColor.copy(alpha = 0.1f), RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { Icon(imageVector = icon, contentDescription = title, tint = iconColor, modifier = Modifier.size(26.dp)) }
             Spacer(modifier = Modifier.height(16.dp))
             Text(text = title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AgroTextPrimary, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             Spacer(modifier = Modifier.height(4.dp))
