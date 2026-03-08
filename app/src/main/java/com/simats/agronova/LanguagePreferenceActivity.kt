@@ -21,9 +21,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.simats.agronova.model.UpdateLanguageRequest
+import com.simats.agronova.service.RetrofitClient
 import com.simats.agronova.ui.theme.AgroBackground
 import com.simats.agronova.ui.theme.AgroGreen
 import com.simats.agronova.ui.theme.AgronovaTheme
+import kotlinx.coroutines.launch
 
 class LanguagePreferenceActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -40,7 +43,10 @@ class LanguagePreferenceActivity : ComponentActivity() {
 @Composable
 fun LanguageScreen(onBack: () -> Unit) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
     val sharedPrefs = context.getSharedPreferences("AgroNovaPrefs", Context.MODE_PRIVATE)
+    val userEmail = sharedPrefs.getString("USER_EMAIL", "") ?: ""
     var selectedLanguage by remember { mutableStateOf(sharedPrefs.getString("USER_LANGUAGE", "English") ?: "English") }
 
     val languages = listOf("English", "Tamil", "Hindi", "Telugu", "Malayalam", "Kannada")
@@ -59,8 +65,22 @@ fun LanguageScreen(onBack: () -> Unit) {
                         shape = RoundedCornerShape(12.dp), color = Color.White, shadowElevation = 1.dp,
                         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp).clickable {
                             selectedLanguage = lang
+
+                            // 1. Save Locally
                             sharedPrefs.edit().putString("USER_LANGUAGE", lang).apply()
                             Toast.makeText(context, "Language set to $lang", Toast.LENGTH_SHORT).show()
+
+                            // 2. Save to Database (Cloud Sync)
+                            if (userEmail.isNotEmpty()) {
+                                coroutineScope.launch {
+                                    try {
+                                        RetrofitClient.apiService.updateLanguage(UpdateLanguageRequest(userEmail, lang))
+                                    } catch (e: Exception) {
+                                        e.printStackTrace() // Fails silently in background if offline
+                                    }
+                                }
+                            }
+
                             onBack()
                         }
                     ) {

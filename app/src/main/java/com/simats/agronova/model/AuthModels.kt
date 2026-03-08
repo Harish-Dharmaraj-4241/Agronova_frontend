@@ -20,7 +20,8 @@ data class LoginResponse(
     val name: String?,
     val location_string: String?,
     val latitude: Double?,
-    val longitude: Double?
+    val longitude: Double?,
+    val preferred_language: String? // NEW
 )
 
 // Request to save location to database
@@ -188,3 +189,4 @@ data class UpdateProfileRequest(
 data class VerifyPasswordRequest(val email: String, val currentPassword: String)
 data class ChangePasswordRequest(val email: String, val newPassword: String)
 data class DeleteAccountRequest(val email: String)
+data class UpdateLanguageRequest(val email: String, val language: String)

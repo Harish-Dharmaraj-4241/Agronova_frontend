@@ -124,10 +124,15 @@ fun LoginScreen(viewModel: AuthViewModel = viewModel()) {
                     putBoolean("IS_LOGGED_IN", true)
 
                     // Save the name and location safely if they exist
+                    // Save the name and location safely if they exist
                     successState.name?.let { putString("USER_NAME", it) }
                     successState.locationString?.let { putString("FARM_LOCATION", it) }
                     successState.lat?.let { putFloat("LATITUDE", it.toFloat()) }
                     successState.lon?.let { putFloat("LONGITUDE", it.toFloat()) }
+
+                    // NEW: Save the cloud language directly into local settings on login!
+                    // If successState.language is null (e.g. your ViewModel didn't pass it), fallback to English
+                    putString("USER_LANGUAGE", successState.language ?: "English")
 
                     apply()
                 }

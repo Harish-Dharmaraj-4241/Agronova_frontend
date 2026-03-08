@@ -108,4 +108,9 @@ interface ApiService {
 
     @POST("delete-account")
     suspend fun deleteAccount(@Body request: DeleteAccountRequest): Response<GenericResponse>
+
+    @POST("update-language")
+    suspend fun updateLanguage(
+        @Body request: UpdateLanguageRequest
+    ): Response<GenericResponse>
 }

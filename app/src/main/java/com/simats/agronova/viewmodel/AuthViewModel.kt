@@ -12,7 +12,7 @@ sealed class AuthState {
     object Idle : AuthState()
     object Loading : AuthState()
     // Added fields to hold user data
-    data class Success(val message: String, val name: String? = null, val locationString: String? = null, val lat: Double? = null, val lon: Double? = null) : AuthState()
+    data class Success(val message: String, val name: String? = null, val locationString: String? = null, val lat: Double? = null, val lon: Double? = null, val language: String? = null) : AuthState()
     data class Error(val error: String) : AuthState()
 }
 
@@ -51,7 +51,8 @@ class AuthViewModel : ViewModel() {
                         name = body?.name,
                         locationString = body?.location_string,
                         lat = body?.latitude,
-                        lon = body?.longitude
+                        lon = body?.longitude,
+                        language = body?.preferred_language
                     )
                 } else {
                     _authState.value = AuthState.Error("Invalid email or password")

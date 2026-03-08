@@ -28,6 +28,8 @@ import com.simats.agronova.ui.theme.AgroBackground
 import com.simats.agronova.ui.theme.AgroGreen
 import com.simats.agronova.ui.theme.AgronovaTheme
 import com.simats.agronova.viewmodel.SettingsViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class SettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -44,6 +46,8 @@ class SettingsActivity : ComponentActivity() {
 @Composable
 fun SettingsScreen(onBack: () -> Unit, viewModel: SettingsViewModel = viewModel()) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope() // Added for the secure DB wipe
+
     val sharedPrefs = context.getSharedPreferences("AgroNovaPrefs", Context.MODE_PRIVATE)
     val userEmail = sharedPrefs.getString("USER_EMAIL", "") ?: ""
 
@@ -56,6 +60,12 @@ fun SettingsScreen(onBack: () -> Unit, viewModel: SettingsViewModel = viewModel(
         if (viewModel.accountDeleted.value) {
             Toast.makeText(context, "Account Permanently Deleted", Toast.LENGTH_LONG).show()
             sharedPrefs.edit().clear().apply()
+
+            // SECURE WIPE: Clear the AI Chat History database!
+            kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+                com.simats.agronova.database.ChatDatabase.getDatabase(context).clearAllTables()
+            }
+
             val intent = Intent(context, LoginActivity::class.java)
             intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
             context.startActivity(intent)
@@ -99,16 +109,27 @@ fun SettingsScreen(onBack: () -> Unit, viewModel: SettingsViewModel = viewModel(
             }
         }
 
-        // LOGOUT DIALOG
+        // LOGOUT DIALOG (With your updated Caution Text)
         if (showLogoutDialog) {
             AlertDialog(
                 onDismissRequest = { showLogoutDialog = false },
                 title = { Text("Logout", fontWeight = FontWeight.Bold) },
-                text = { Text("Are you sure you want to log out of AgroNova?") },
+                text = {
+                    Text(
+                        text = "Are you sure you want to log out of AgroNova?\n\nNote: For your privacy, your current AI Assistant chat history will be permanently cleared when you log out.",
+                        lineHeight = 20.sp
+                    )
+                },
                 confirmButton = {
                     Button(
                         onClick = {
-                            sharedPrefs.edit().clear().apply() // Clear data!
+                            sharedPrefs.edit().clear().apply() // Clear login data
+
+                            // SECURE WIPE: Clear the AI Chat History database!
+                            coroutineScope.launch(Dispatchers.IO) {
+                                com.simats.agronova.database.ChatDatabase.getDatabase(context).clearAllTables()
+                            }
+
                             val intent = Intent(context, LoginActivity::class.java)
                             intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
                             context.startActivity(intent)
