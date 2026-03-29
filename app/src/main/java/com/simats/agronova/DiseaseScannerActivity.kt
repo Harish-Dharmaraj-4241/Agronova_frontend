@@ -1,7 +1,10 @@
 package com.simats.agronova
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
@@ -37,12 +40,25 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.simats.agronova.ui.theme.AgroGreen
 import com.simats.agronova.ui.theme.AgronovaTheme
 import com.simats.agronova.viewmodel.DiseaseScannerViewModel
+import java.io.File
+import java.io.FileOutputStream
 import java.util.*
+
+// Helper function to compress camera bitmap and convert to Uri for Gemini upload
+fun bitmapToUri(context: Context, bitmap: Bitmap): Uri {
+    val file = File(context.cacheDir, "scan_${System.currentTimeMillis()}.jpg")
+    val out = FileOutputStream(file)
+    bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out) // 85% compression saves data!
+    out.flush()
+    out.close()
+    return Uri.fromFile(file)
+}
 
 class DiseaseScannerActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private lateinit var tts: TextToSpeech
@@ -103,7 +119,6 @@ class DiseaseScannerActivity : ComponentActivity(), TextToSpeech.OnInitListener 
     }
 }
 
-// State Enum for clean Animation Transitions
 enum class ScanState { EMPTY, LOADING, ERROR, SUCCESS }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -118,7 +133,6 @@ fun DiseaseScannerScreen(
     val sharedPrefs = context.getSharedPreferences("AgroNovaPrefs", Context.MODE_PRIVATE)
 
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
-    // Read the global language from Settings!
     var selectedLanguage by remember { mutableStateOf(sharedPrefs.getString("USER_LANGUAGE", "English") ?: "English") }
     var expandedLanguageMenu by remember { mutableStateOf(false) }
     var isSpeaking by remember { mutableStateOf(false) }
@@ -128,6 +142,16 @@ fun DiseaseScannerScreen(
     val isLoading by viewModel.isLoading
     val error by viewModel.errorMessage
 
+    // Camera Launcher - Takes picture, compresses it, and sends to Gemini
+    val takePictureLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap ->
+        if (bitmap != null) {
+            val compressedUri = bitmapToUri(context, bitmap)
+            selectedImageUri = compressedUri
+            viewModel.analyzeImage(context, compressedUri, selectedLanguage)
+        }
+    }
+
+    // Gallery Launcher
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             selectedImageUri = uri
@@ -135,7 +159,15 @@ fun DiseaseScannerScreen(
         }
     }
 
-    // Determine current UI state for animations
+    // Permission Handler
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+        if (isGranted) {
+            takePictureLauncher.launch(null)
+        } else {
+            Toast.makeText(context, "Camera permission required to scan.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     val currentState = when {
         isLoading -> ScanState.LOADING
         error != null -> ScanState.ERROR
@@ -170,7 +202,6 @@ fun DiseaseScannerScreen(
                                     onClick = {
                                         selectedLanguage = lang
                                         expandedLanguageMenu = false
-                                        // Save back to global settings if changed here!
                                         sharedPrefs.edit().putString("USER_LANGUAGE", lang).apply()
 
                                         if (selectedImageUri != null && !isLoading) {
@@ -185,13 +216,12 @@ fun DiseaseScannerScreen(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
             )
         },
-        containerColor = Color(0xFFF1F5F9) // Matched Chemical Translator light grayish background
+        containerColor = Color(0xFFF1F5F9)
     ) { paddingValues ->
         Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
 
             // Top Area: Scanner OR Blurred Image
             if (selectedImageUri != null) {
-                // Glassmorphism aesthetic: Blurred background with dark overlay
                 AsyncImage(
                     model = selectedImageUri,
                     contentDescription = "Selected Crop",
@@ -200,33 +230,48 @@ fun DiseaseScannerScreen(
                 )
                 Box(modifier = Modifier.fillMaxWidth().fillMaxHeight(0.35f).background(Color.Black.copy(alpha = 0.4f)))
             } else {
-                // Premium Scanner Empty State (Matched Chemical Translator)
+                // Dual-Button Empty State (Camera + Gallery)
                 Box(
-                    modifier = Modifier.fillMaxWidth().fillMaxHeight(0.35f).background(Color(0xFF1E293B)).clickable { imagePicker.launch("image/*") },
+                    modifier = Modifier.fillMaxWidth().fillMaxHeight(0.35f).background(Color(0xFF1E293B)),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Outlined.CropFree, contentDescription = null, tint = AgroGreen, modifier = Modifier.size(100.dp))
+                        Icon(Icons.Outlined.CropFree, contentDescription = null, tint = AgroGreen, modifier = Modifier.size(80.dp))
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text("Tap to scan crop leaf", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Button(
+                                onClick = {
+                                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                                        takePictureLauncher.launch(null)
+                                    } else {
+                                        permissionLauncher.launch(Manifest.permission.CAMERA)
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = AgroGreen)
+                            ) {
+                                Icon(Icons.Filled.CameraAlt, contentDescription = null, tint = Color.White)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Camera")
+                            }
+                            Button(
+                                onClick = { imagePicker.launch("image/*") },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF475569))
+                            ) {
+                                Icon(Icons.Filled.PhotoLibrary, contentDescription = null, tint = Color.White)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Gallery")
+                            }
+                        }
                     }
                 }
             }
 
-            // Bottom Sheet Content with Smooth Transitions
             Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .fillMaxHeight(0.72f) // Matched Chemical Translator height
-                    .align(Alignment.BottomCenter)
-                    .shadow(24.dp, RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)),
+                modifier = Modifier.fillMaxWidth().fillMaxHeight(0.72f).align(Alignment.BottomCenter).shadow(24.dp, RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)),
                 shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
                 color = Color.White
             ) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp).verticalScroll(rememberScrollState())
-                ) {
-                    // Pull Tab
+                Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp).verticalScroll(rememberScrollState())) {
                     Box(modifier = Modifier.width(48.dp).height(5.dp).background(Color(0xFFE2E8F0), CircleShape).align(Alignment.CenterHorizontally))
                     Spacer(modifier = Modifier.height(24.dp))
 
@@ -237,7 +282,7 @@ fun DiseaseScannerScreen(
                                     Icon(Icons.Filled.EnergySavingsLeaf, contentDescription = null, tint = Color.LightGray, modifier = Modifier.size(80.dp))
                                     Spacer(modifier = Modifier.height(16.dp))
                                     Text("Awaiting Crop Image", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFF64748B))
-                                    Text("Upload an image to start AI diagnosis.", fontSize = 14.sp, color = Color.Gray, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp))
+                                    Text("Upload or capture an image to start AI diagnosis.", fontSize = 14.sp, color = Color.Gray, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp))
                                 }
                             }
                             ScanState.LOADING -> {
@@ -261,14 +306,12 @@ fun DiseaseScannerScreen(
                             }
                             ScanState.SUCCESS -> {
                                 Column {
-                                    // Title & Confidence Row
                                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
                                         Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
                                             Text(result!!.diseaseName, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0F172A), lineHeight = 32.sp)
                                             Spacer(modifier = Modifier.height(4.dp))
                                             Text("Detected in Crop", fontSize = 14.sp, color = Color(0xFF64748B))
                                         }
-                                        // Premium Pill Badge
                                         Surface(color = Color(0xFFECFDF5), shape = RoundedCornerShape(50), border = BorderStroke(1.dp, Color(0xFFA7F3D0))) {
                                             Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                                                 Icon(Icons.Filled.Verified, contentDescription = null, tint = AgroGreen, modifier = Modifier.size(16.dp))
@@ -282,7 +325,6 @@ fun DiseaseScannerScreen(
                                     Text(result!!.description, fontSize = 15.sp, color = Color(0xFF334155), lineHeight = 24.sp)
                                     Spacer(modifier = Modifier.height(28.dp))
 
-                                    // Premium Treatment Steps Card
                                     Surface(color = Color(0xFFF8FAFC), shape = RoundedCornerShape(20.dp), shadowElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
                                         Column(modifier = Modifier.padding(20.dp)) {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -294,7 +336,6 @@ fun DiseaseScannerScreen(
 
                                             result!!.treatmentSteps.forEachIndexed { index, step ->
                                                 Row(modifier = Modifier.padding(bottom = 16.dp), verticalAlignment = Alignment.Top) {
-                                                    // Circular Number Badge
                                                     Box(modifier = Modifier.size(26.dp).background(Color(0xFFD1FAE5), CircleShape), contentAlignment = Alignment.Center) {
                                                         Text("${index + 1}", color = AgroGreen, fontWeight = FontWeight.ExtraBold, fontSize = 13.sp)
                                                     }
@@ -307,7 +348,6 @@ fun DiseaseScannerScreen(
 
                                     Spacer(modifier = Modifier.height(28.dp))
 
-                                    // Primary Action Button (Hear Instructions)
                                     Button(
                                         onClick = {
                                             if (isSpeaking) {
@@ -330,7 +370,6 @@ fun DiseaseScannerScreen(
 
                                     Spacer(modifier = Modifier.height(12.dp))
 
-                                    // Secondary Action Button
                                     TextButton(
                                         onClick = { imagePicker.launch("image/*") },
                                         modifier = Modifier.fillMaxWidth().height(50.dp)

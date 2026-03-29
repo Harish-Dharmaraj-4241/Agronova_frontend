@@ -1,7 +1,10 @@
 package com.simats.agronova
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
@@ -38,12 +41,24 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.simats.agronova.ui.theme.AgroGreen
 import com.simats.agronova.ui.theme.AgronovaTheme
 import com.simats.agronova.viewmodel.ChemicalTranslatorViewModel
+import java.io.File
+import java.io.FileOutputStream
 import java.util.*
+
+fun chemBitmapToUri(context: Context, bitmap: Bitmap): Uri {
+    val file = File(context.cacheDir, "chem_scan_${System.currentTimeMillis()}.jpg")
+    val out = FileOutputStream(file)
+    bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
+    out.flush()
+    out.close()
+    return Uri.fromFile(file)
+}
 
 class ChemicalTranslatorActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private lateinit var tts: TextToSpeech
@@ -116,7 +131,6 @@ fun ChemicalScannerScreen(
     val sharedPrefs = context.getSharedPreferences("AgroNovaPrefs", Context.MODE_PRIVATE)
 
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
-    // Read the global language from Settings!
     var selectedLanguage by remember { mutableStateOf(sharedPrefs.getString("USER_LANGUAGE", "English") ?: "English") }
     var expandedLanguageMenu by remember { mutableStateOf(false) }
     var isSpeaking by remember { mutableStateOf(false) }
@@ -126,10 +140,26 @@ fun ChemicalScannerScreen(
     val isLoading by viewModel.isLoading
     val error by viewModel.errorMessage
 
+    val takePictureLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap ->
+        if (bitmap != null) {
+            val compressedUri = chemBitmapToUri(context, bitmap)
+            selectedImageUri = compressedUri
+            viewModel.analyzeChemicalLabel(context, compressedUri, selectedLanguage)
+        }
+    }
+
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             selectedImageUri = uri
             viewModel.analyzeChemicalLabel(context, uri, selectedLanguage)
+        }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+        if (isGranted) {
+            takePictureLauncher.launch(null)
+        } else {
+            Toast.makeText(context, "Camera permission required to scan.", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -167,7 +197,6 @@ fun ChemicalScannerScreen(
                                     onClick = {
                                         selectedLanguage = lang
                                         expandedLanguageMenu = false
-                                        // Save back to global settings if changed here!
                                         sharedPrefs.edit().putString("USER_LANGUAGE", lang).apply()
 
                                         if (selectedImageUri != null && !isLoading) {
@@ -182,13 +211,12 @@ fun ChemicalScannerScreen(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
             )
         },
-        containerColor = Color(0xFFF1F5F9) // Light grayish background
+        containerColor = Color(0xFFF1F5F9)
     ) { paddingValues ->
         Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
 
             // Top Area: Scanner OR Blurred Image
             if (selectedImageUri != null) {
-                // Glassmorphism aesthetic: Blurred background with dark overlay
                 AsyncImage(
                     model = selectedImageUri,
                     contentDescription = "Label",
@@ -197,32 +225,49 @@ fun ChemicalScannerScreen(
                 )
                 Box(modifier = Modifier.fillMaxWidth().fillMaxHeight(0.35f).background(Color.Black.copy(alpha = 0.4f)))
             } else {
-                // Premium Scanner Empty State
+                // Dual-Button Empty State
                 Box(
-                    modifier = Modifier.fillMaxWidth().fillMaxHeight(0.35f).background(Color(0xFF1E293B)).clickable { imagePicker.launch("image/*") },
+                    modifier = Modifier.fillMaxWidth().fillMaxHeight(0.35f).background(Color(0xFF1E293B)),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Outlined.CropFree, contentDescription = null, tint = Color(0xFF64B5F6), modifier = Modifier.size(100.dp))
+                        Icon(Icons.Outlined.CropFree, contentDescription = null, tint = Color(0xFF64B5F6), modifier = Modifier.size(80.dp))
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text("Tap to scan chemical label", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Button(
+                                onClick = {
+                                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                                        takePictureLauncher.launch(null)
+                                    } else {
+                                        permissionLauncher.launch(Manifest.permission.CAMERA)
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6))
+                            ) {
+                                Icon(Icons.Filled.CameraAlt, contentDescription = null, tint = Color.White)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Camera")
+                            }
+                            Button(
+                                onClick = { imagePicker.launch("image/*") },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF475569))
+                            ) {
+                                Icon(Icons.Filled.PhotoLibrary, contentDescription = null, tint = Color.White)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Gallery")
+                            }
+                        }
                     }
                 }
             }
 
             // Bottom Sheet Content
             Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .fillMaxHeight(0.72f)
-                    .align(Alignment.BottomCenter)
-                    .shadow(24.dp, RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)),
+                modifier = Modifier.fillMaxWidth().fillMaxHeight(0.72f).align(Alignment.BottomCenter).shadow(24.dp, RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)),
                 shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
                 color = Color.White
             ) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp).verticalScroll(rememberScrollState())
-                ) {
+                Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp).verticalScroll(rememberScrollState())) {
                     Box(modifier = Modifier.width(48.dp).height(5.dp).background(Color(0xFFE2E8F0), CircleShape).align(Alignment.CenterHorizontally))
                     Spacer(modifier = Modifier.height(24.dp))
 
@@ -266,7 +311,6 @@ fun ChemicalScannerScreen(
                                 }
 
                                 Column {
-                                    // Title & Toxicity Badge
                                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
                                         Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
                                             Text(result!!.chemicalName, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0F172A), lineHeight = 30.sp)
@@ -284,25 +328,9 @@ fun ChemicalScannerScreen(
 
                                     Spacer(modifier = Modifier.height(24.dp))
 
-                                    // Dosage Card (Blue)
-                                    InfoCard(
-                                        icon = Icons.Filled.WaterDrop,
-                                        iconColor = Color(0xFF2563EB),
-                                        bgColor = Color(0xFFEFF6FF),
-                                        title = "Mixing & Dosage",
-                                        text = result!!.dosage
-                                    )
+                                    InfoCard(icon = Icons.Filled.WaterDrop, iconColor = Color(0xFF2563EB), bgColor = Color(0xFFEFF6FF), title = "Mixing & Dosage", text = result!!.dosage)
+                                    InfoCard(icon = Icons.Filled.AccessTimeFilled, iconColor = Color(0xFFD97706), bgColor = Color(0xFFFFFBEB), title = "Best Time to Apply", text = result!!.timing)
 
-                                    // Timing Card (Yellow/Orange)
-                                    InfoCard(
-                                        icon = Icons.Filled.AccessTimeFilled,
-                                        iconColor = Color(0xFFD97706),
-                                        bgColor = Color(0xFFFFFBEB),
-                                        title = "Best Time to Apply",
-                                        text = result!!.timing
-                                    )
-
-                                    // Safety Warnings Card (Red)
                                     Surface(color = Color(0xFFFEF2F2), shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
                                         Column(modifier = Modifier.padding(16.dp)) {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -322,7 +350,6 @@ fun ChemicalScannerScreen(
 
                                     Spacer(modifier = Modifier.height(12.dp))
 
-                                    // Hear Instructions Button
                                     Button(
                                         onClick = {
                                             if (isSpeaking) {
@@ -336,7 +363,7 @@ fun ChemicalScannerScreen(
                                         },
                                         modifier = Modifier.fillMaxWidth().height(56.dp).shadow(6.dp, RoundedCornerShape(16.dp)),
                                         shape = RoundedCornerShape(16.dp),
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)) // Dark sleek button
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B))
                                     ) {
                                         Icon(if(isSpeaking) Icons.Filled.Stop else Icons.Filled.VolumeUp, contentDescription = null, tint = Color.White)
                                         Spacer(modifier = Modifier.width(12.dp))

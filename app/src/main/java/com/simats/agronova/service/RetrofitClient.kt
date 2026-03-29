@@ -7,7 +7,7 @@ import java.util.concurrent.TimeUnit
 
 object RetrofitClient {
 
-    private const val BASE_URL = "http://10.190.195.125:5000/"
+    private const val BASE_URL = "http://10.100.140.31:5000/"
     // NEW: Increase the timeout limit so the AI has time to think!
     private val okHttpClient = OkHttpClient.Builder()
         .connectTimeout(60, TimeUnit.SECONDS)
@@ -23,4 +23,4 @@ object RetrofitClient {
             .build()
             .create(ApiService::class.java)
     }
-}
+}   

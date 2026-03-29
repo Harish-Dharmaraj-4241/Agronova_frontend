@@ -16,7 +16,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private var lastFetchTime = 0L
 
-    fun fetchWeather(context: Context) {
+    // Added 'forceRefresh' parameter
+    fun fetchWeather(context: Context, forceRefresh: Boolean = false) {
         val prefs = context.getSharedPreferences("AgroNovaPrefs", Context.MODE_PRIVATE)
         val lat = prefs.getFloat("LATITUDE", 0f).toDouble()
         val lon = prefs.getFloat("LONGITUDE", 0f).toDouble()
@@ -24,7 +25,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         if (lat == 0.0 && lon == 0.0) return
 
         val currentTime = System.currentTimeMillis()
-        if (weatherData.value != null && (currentTime - lastFetchTime) < 3600000) return
+        // Bypass the 1-hour wait if forceRefresh is true!
+        if (!forceRefresh && weatherData.value != null && (currentTime - lastFetchTime) < 3600000) return
 
         isLoading.value = true
         apiError.value = null

@@ -157,6 +157,36 @@ fun ToolsScreen(viewModel: ToolsViewModel = viewModel()) {
                 }
             }
 
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // NEW SECTION: Offline Plant Doctor Card
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                shadowElevation = 6.dp,
+                modifier = Modifier.fillMaxWidth().clickable {
+                    // This will launch the new AI camera screen we build next!
+                    context.startActivity(Intent(context, Class.forName("com.simats.agronova.OfflineScannerActivity")))
+                }
+            ) {
+                Box(
+                    modifier = Modifier
+                        .background(Brush.horizontalGradient(listOf(Color(0xFFD97706), Color(0xFF92400E)))) // Earthy Harvest Golden theme
+                        .padding(24.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(shape = CircleShape, color = Color.White.copy(alpha = 0.15f)) {
+                            Icon(Icons.Filled.WifiOff, contentDescription = null, tint = Color.White, modifier = Modifier.padding(14.dp).size(30.dp))
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column {
+                            Text("Offline Plant Doctor", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("Scan crop diseases with zero internet using On-Device AI.", fontSize = 13.sp, color = Color.White.copy(alpha = 0.85f), lineHeight = 18.sp)
+                        }
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(28.dp))
             Text("🗞️ Live Agri-News", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0F172A))
             Spacer(modifier = Modifier.height(16.dp))
@@ -205,9 +235,6 @@ fun NewsCard(news: AgriNewsItem, userLanguage: String) {
         shadowElevation = 2.dp,
         modifier = Modifier.fillMaxWidth().clickable {
             if (news.link.isNotEmpty()) {
-                // FIX: Open the link directly!
-                // The Python backend is already fetching native regional websites,
-                // so we don't need the Google Translate wrapper here anymore!
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(news.link))
                 context.startActivity(intent)
             }

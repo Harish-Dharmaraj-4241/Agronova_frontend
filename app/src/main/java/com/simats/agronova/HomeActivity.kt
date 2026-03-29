@@ -36,6 +36,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -79,7 +80,6 @@ fun HomeScreen() {
     val sharedPrefs = context.getSharedPreferences("AgroNovaPrefs", Context.MODE_PRIVATE)
     val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
 
-    // Inject ViewModels
     val homeViewModel: HomeViewModel = viewModel()
     val cropCalendarViewModel: CropCalendarViewModel = viewModel()
 
@@ -90,9 +90,12 @@ fun HomeScreen() {
     var showLocationDialog by remember { mutableStateOf(false) }
     var isFetchingLocation by remember { mutableStateOf(false) }
 
-    // Fetch live weather & calendar when location changes
+    // Swipe to Refresh logic!
+    // (Swipe-to-refresh state removed due to Compose version mismatch)
+    // Weather will still auto-update when savedLocation changes!
+
     LaunchedEffect(savedLocation) {
-        homeViewModel.fetchWeather(context)
+        homeViewModel.fetchWeather(context, forceRefresh = true)
         cropCalendarViewModel.fetchCalendars(context)
     }
 
@@ -261,97 +264,98 @@ fun HomeScreen() {
         },
         containerColor = AgroBackground
     ) { paddingValues ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .verticalScroll(rememberScrollState())
-                .padding(20.dp)
-        ) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
-                Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
-                    Text(text = greeting, fontSize = 18.sp, color = Color.Gray, maxLines = 1)
-                    Text(text = "$userName 👋", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = AgroGreen, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Spacer(modifier = Modifier.height(6.dp))
+        Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(20.dp)
+            ) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                        Text(text = greeting, fontSize = 18.sp, color = Color.Gray, maxLines = 1)
+                        Text(text = "$userName 👋", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = AgroGreen, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Spacer(modifier = Modifier.height(6.dp))
 
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { showLocationDialog = true }.padding(vertical = 4.dp, horizontal = 2.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { showLocationDialog = true }.padding(vertical = 4.dp, horizontal = 2.dp)
+                        ) {
+                            Icon(Icons.Filled.LocationOn, contentDescription = "Location", tint = AgroGreen, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(text = savedLocation, fontSize = 14.sp, color = AgroTextPrimary, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, tint = Color.Gray)
+                        }
+                    }
+
+                    IconButton(
+                        onClick = {
+                            context.startActivity(Intent(context, SettingsActivity::class.java))
+                            (context as? Activity)?.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
+                        },
+                        modifier = Modifier.background(Color.White, CircleShape).shadow(2.dp, CircleShape)
                     ) {
-                        Icon(Icons.Filled.LocationOn, contentDescription = "Location", tint = AgroGreen, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = savedLocation, fontSize = 14.sp, color = AgroTextPrimary, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Icon(Icons.Filled.ArrowDropDown, contentDescription = null, tint = Color.Gray)
+                        Icon(Icons.Outlined.Settings, contentDescription = "Settings", tint = Color.DarkGray)
                     }
                 }
 
-                IconButton(
-                    onClick = {
-                        context.startActivity(Intent(context, SettingsActivity::class.java))
-                        (context as? Activity)?.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
-                    },
-                    modifier = Modifier.background(Color.White, CircleShape).shadow(2.dp, CircleShape)
-                ) {
-                    Icon(Icons.Outlined.Settings, contentDescription = "Settings", tint = Color.DarkGray)
-                }
-            }
+                Spacer(modifier = Modifier.height(24.dp))
 
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Weather Card
-            GoogleWeatherCard(homeViewModel, cropCalendarViewModel) {
-                context.startActivity(Intent(context, WeatherActivity::class.java))
-                (context as? Activity)?.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                ActionCard(modifier = Modifier.weight(1f), title = "Disease Scanner", subtitle = "Instant Diagnosis", icon = Icons.Filled.CameraAlt, iconColor = Color(0xFFFF8A65), onClick = { context.startActivity(Intent(context, DiseaseScannerActivity::class.java)) })
-                ActionCard(modifier = Modifier.weight(1f), title = "Chemical Translator", subtitle = "Safety Insights", icon = Icons.Filled.Science, iconColor = Color(0xFF64B5F6), onClick = { context.startActivity(Intent(context, ChemicalTranslatorActivity::class.java)) })
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                ActionCard(modifier = Modifier.weight(1f), title = "Crop Calendar", subtitle = "Plan Season", icon = Icons.Filled.CalendarMonth, iconColor = Color(0xFFBA68C8), onClick = { context.startActivity(Intent(context, CropCalendarActivity::class.java)) })
-                ActionCard(modifier = Modifier.weight(1f), title = "Resource Hub", subtitle = "Local Marketplace", icon = Icons.Filled.Handshake, iconColor = Color(0xFF4DB6AC), onClick = { context.startActivity(Intent(context, ResourceHubActivity::class.java)) })
-            }
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            // NEW: Clean, click-to-open Teaser Card for Market Intelligence
-            Text("Market Intelligence", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0F172A), modifier = Modifier.padding(bottom = 12.dp, start = 4.dp))
-
-            Surface(
-                shape = RoundedCornerShape(24.dp),
-                shadowElevation = 3.dp,
-                color = Color.White,
-                modifier = Modifier.fillMaxWidth().clickable {
-                    context.startActivity(Intent(context, MarketIntelligenceActivity::class.java))
+                GoogleWeatherCard(homeViewModel, cropCalendarViewModel) {
+                    context.startActivity(Intent(context, WeatherActivity::class.java))
                     (context as? Activity)?.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
                 }
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(20.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                        Surface(color = Color(0xFFE8F5E9), shape = CircleShape) {
-                            Icon(Icons.Filled.TrendingUp, contentDescription = null, tint = AgroGreen, modifier = Modifier.padding(12.dp).size(28.dp))
-                        }
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column {
-                            Text("AI Price Prediction", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0F172A))
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text("Tap to view today's market trends and crop sowing advice.", fontSize = 13.sp, color = Color.Gray, lineHeight = 18.sp)
-                        }
-                    }
-                    Icon(Icons.Filled.ChevronRight, contentDescription = "View", tint = Color.LightGray)
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    ActionCard(modifier = Modifier.weight(1f), title = "Disease Scanner", subtitle = "Instant Diagnosis", icon = Icons.Filled.CameraAlt, iconColor = Color(0xFFFF8A65), onClick = { context.startActivity(Intent(context, DiseaseScannerActivity::class.java)) })
+                    ActionCard(modifier = Modifier.weight(1f), title = "Chemical Translator", subtitle = "Safety Insights", icon = Icons.Filled.Science, iconColor = Color(0xFF64B5F6), onClick = { context.startActivity(Intent(context, ChemicalTranslatorActivity::class.java)) })
                 }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    ActionCard(modifier = Modifier.weight(1f), title = "Crop Calendar", subtitle = "Plan Season", icon = Icons.Filled.CalendarMonth, iconColor = Color(0xFFBA68C8), onClick = { context.startActivity(Intent(context, CropCalendarActivity::class.java)) })
+                    ActionCard(modifier = Modifier.weight(1f), title = "Resource Hub", subtitle = "Local Marketplace", icon = Icons.Filled.Handshake, iconColor = Color(0xFF4DB6AC), onClick = { context.startActivity(Intent(context, ResourceHubActivity::class.java)) })
+                }
+
+                Spacer(modifier = Modifier.height(32.dp))
+
+                Text("Market Intelligence", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0F172A), modifier = Modifier.padding(bottom = 12.dp, start = 4.dp))
+
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    shadowElevation = 3.dp,
+                    color = Color.White,
+                    modifier = Modifier.fillMaxWidth().clickable {
+                        context.startActivity(Intent(context, MarketIntelligenceActivity::class.java))
+                        (context as? Activity)?.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
+                    }
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(20.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                            Surface(color = Color(0xFFE8F5E9), shape = CircleShape) {
+                                Icon(Icons.Filled.TrendingUp, contentDescription = null, tint = AgroGreen, modifier = Modifier.padding(12.dp).size(28.dp))
+                            }
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column {
+                                Text("AI Price Prediction", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0F172A))
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text("Tap to view today's market trends and crop sowing advice.", fontSize = 13.sp, color = Color.Gray, lineHeight = 18.sp)
+                            }
+                        }
+                        Icon(Icons.Filled.ChevronRight, contentDescription = "View", tint = Color.LightGray)
+                    }
+                }
+                Spacer(modifier = Modifier.height(20.dp))
             }
-            Spacer(modifier = Modifier.height(20.dp))
+
+            // The loading spinner indicator
         }
     }
 }
@@ -484,9 +488,11 @@ fun PulseAnimation() {
 fun ActionCard(modifier: Modifier = Modifier, title: String, subtitle: String, icon: ImageVector, iconColor: Color, onClick: () -> Unit) {
     Surface(shape = RoundedCornerShape(20.dp), color = Color.White, shadowElevation = 2.dp, modifier = modifier.height(140.dp).clickable { onClick() }) {
         Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(modifier = Modifier.size(50.dp).background(iconColor.copy(alpha = 0.1f), RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { Icon(imageVector = icon, contentDescription = title, tint = iconColor, modifier = Modifier.size(26.dp)) }
+            Box(modifier = Modifier.size(50.dp).background(iconColor.copy(alpha = 0.1f), RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
+                Icon(imageVector = icon, contentDescription = title, tint = iconColor, modifier = Modifier.size(26.dp))
+            }
             Spacer(modifier = Modifier.height(16.dp))
-            Text(text = title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AgroTextPrimary, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            Text(text = title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             Spacer(modifier = Modifier.height(4.dp))
             Text(text = subtitle, fontSize = 12.sp, color = Color.Gray, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         }

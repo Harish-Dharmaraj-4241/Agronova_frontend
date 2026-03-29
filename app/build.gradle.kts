@@ -62,6 +62,10 @@ dependencies {
     implementation("com.google.android.gms:play-services-location:21.2.0")
     implementation("io.coil-kt:coil-compose:2.5.0")
     implementation("org.osmdroid:osmdroid-android:6.1.18")
+    // TensorFlow Lite for Offline Machine Learning
+    implementation("org.tensorflow:tensorflow-lite-task-vision:0.4.4")
+    implementation("org.tensorflow:tensorflow-lite-gpu-delegate-plugin:0.4.4")
+    implementation("org.tensorflow:tensorflow-lite:2.14.0")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
